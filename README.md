@@ -2,42 +2,28 @@ This is a template you can use for your final project. Fill in each section with
 
 ## Short Description
 
-Give a short, 1-2 paragraph description of your project. Focus on the code, not the theoretical / substantive / academic side of things. 
+The projects aim was to gather and analyze data surrounding former coup d'etat leaders in democratic elections in sub-Saharan Africa. 
+
+The coding aspect of the project was focused on merging the data  for each year on interest (the year of the coup, year of leaders exit, and the year of the election). Therefore, the data was merged multiple times and it was very important to rename variables before margining for the next year unit of interest. The graphs are made in ggplot2, and have many specific alterations. In doing so, the images are clear and more illustrative of the data. 
 
 ## Dependencies
 
-List what software your code depends on, as well as version numbers, like so:.
-
 1. R, version 3.1
-2. Python 2.7, Anaconda distribution.
-
-(In your code itself, includes commands that install required packages.)
-
-## Files
-
-List all other files contained in the repo, along with a brief description of each one, like so:
 
 ### Data
 
-1. polity.csv: The PolityVI dataset, available here: http://www.systemicpeace.org/inscrdata.html
-2. nyt.csv: Contains data from the New York Times API collected via collect-nyt.ipynb . Includes information on all articles containing the term "Programmer Cat", 1980-2010.
-3. analysis-dataset.csv: The final Analysis Dataset derived from the raw data above. It includes country-year values for all UN countries 1980-2010, with observations for the following variables: 
-    - *ccode*: Correlates of War numeric code for country observation
-    - *year*: Year of observation
-    - *polity*: PolityVI score
-    - *nyt*: Number of New York Times articles about "Programmer Cat"
+1. p4v2014.xls: The PolityVI dataset, available here: http://www.systemicpeace.org/inscrdata.html
 
-### Code
+2. WDI: the world bank information is including in an R package.
 
-1. 01_collect-nyt.py: Collects data from New York Times API and exports data to the file nyt.csv
-2. 02_merge-data.R: Loads, cleans, and merges the raw Polity and NYT datasets into the Analysis Dataset.
-2. 03_analysis.R: Conducts descriptive analysis of the data, producing the tables and visualizations found in the Results directory.
+* the original raw data is not included in this repo, please email mlthomps@berkeley.edu if you have questions.
 
-### Results
+### Code and Results
 
-1. coverage-over-time.jpeg: Graphs the number of articles about each region over time.
-2. regression-table.txt: Summarizes the results of OLS regression, modelling *nyt* on a number of covariates.
+The entirety of the project was done in R. This code merges the data, performs the analytics, and creates the images.
+
+FinalComputationRCode12_12.Rmd: 
+
 
 ## More Information
-
-Include any other details you think your user might need to reproduce your results. You may also include other information such as your contact information, credits, etc.
+The original raw data is not included in the repo.

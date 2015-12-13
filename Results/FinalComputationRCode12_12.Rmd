@@ -1,0 +1,413 @@
+---
+output: pdf_document
+---
+---
+title: "Final Project"
+author: "Melanie Thompson"
+date: "December 12, 2015"
+output: pdf_document
+---
+```{r}
+#Clear out your environment.
+rm(list=ls())
+#load libraries 
+
+library(lubridate)
+library(foreign)
+library(WDI)
+library(countrycode)
+library(gdata)
+library(zoo)
+library(date)
+library(ggplot2)
+library(Hmisc)
+library(stargazer)
+
+```
+```{r}
+# Loading my data
+# Set your working directory to wherever you have saved this data.
+setwd("/Users/Mlthomps/Dropbox/Coup Dataset")
+OrigData <- read.csv("Mycoupdataset.12.11.15.csv", header=TRUE)
+```
+First, we need to fix the year formatting, as it is not in a workable R format.
+```{r}
+# Converting date columns into correct formats as dates.
+OrigData$CoupStart <- as.Date(OrigData$date.of.coup, format = "%m/%d/%y")
+OrigData$CoupEnd <- as.Date(OrigData$ExitDate, format = "%m/%d/%y")
+OrigData$ElectionDate <- as.Date(OrigData$Date.of.Election...Round.one, format = "%m/%d/%y")
+# Correct invalid years (the package sometimes changes years into years that have not happened yet. Most of these occur in the 60's and are incorrectly changed to 2060, not 1960)
+
+OrigData$CoupStart[5] <- "1966-01-03"
+OrigData$CoupStart[6] <- "1966-01-03"
+OrigData$CoupStart[29] <- "1968-08-01"
+OrigData$CoupEnd[29] <- "1968-08-01"
+OrigData$CoupStart[64] <- "1962-12-17"
+OrigData$CoupEnd[64] <- "1962-12-17"
+
+# Get rid of old date columns
+OrigData$date.of.coup <- NULL
+OrigData$ExitDate <- NULL
+OrigData$Date.of.Election...Round.one <- NULL
+
+#Extract Year - this wil be important for merging later!
+OrigData$Coupyear <- format(OrigData$CoupStart, "%Y")
+OrigData$Exityear <- format(OrigData$CoupEnd, "%Y")
+OrigData$Electionyear <- format(OrigData$ElectionDate, "%Y")
+```
+Now we can calculate the Reign (time in power) of the Coup Leader
+```{r}
+OrigData$Reign.days<- difftime(OrigData$CoupEnd,OrigData$CoupStart, units = c("days"))
+OrigData$Reign.weeks<- difftime(OrigData$CoupEnd,OrigData$CoupStart, units = c("weeks"))
+OrigData$Reign.years <- year(OrigData$CoupEnd)-year(OrigData$CoupStart)
+```
+
+How long from the end of the coup to the election?
+
+```{r}
+# Calculating years from coup to election
+OrigData$TimeOff.days<- difftime(OrigData$ElectionDate,OrigData$CoupEnd, units = c("days"))
+OrigData$TimeOff.weeks<- difftime(OrigData$ElectionDate,OrigData$CoupEnd, units = c("weeks"))
+OrigData$TimeOff.years <- year(OrigData$ElectionDate)- year(OrigData$CoupEnd)
+```
+Assigning a Country Code
+```{r}
+OrigData$cown <- countrycode(OrigData$Country, "country.name", "cown")
+```
+Merging World Bank Data: GDP CoupStart
+```{r}
+#download data
+wdi.gdp <- WDI(country = "all", indicator = c("NY.GDP.PCAP.CD"), start = 1960, end = 2015) 
+# Add "iso2c" column in OrigData
+OrigData$iso2c <- countrycode(OrigData$Country, "country.name", "iso2c")
+# Need to rename Country to match WDI year. Lesson: Never capitalize when making your own dataset.
+colnames(OrigData)[colnames(OrigData)=="Country"] <- "country"
+colnames(wdi.gdp)[colnames(wdi.gdp)=="year"] <- "Coupyear"
+OrigData <- merge(OrigData,wdi.gdp,by=c("Coupyear","iso2c"),all.x=TRUE) 
+#rename column
+colnames(OrigData)[colnames(OrigData)=="NY.GDP.PCAP.CD"] <- "EnterGDP"
+# clean up- merging adds some extra country columns we do not want to keep
+OrigData$country.x <- NULL
+OrigData$country.y <- NULL
+```
+Merging World Bank Data: GDP Exityear
+```{r}
+# Need to rename Country to match WDI year. We now want the same information as before but for a different year.
+colnames(wdi.gdp)[colnames(wdi.gdp)=="Coupyear"] <- "Exityear"
+OrigData <- merge(OrigData,wdi.gdp,by=c("Exityear", "iso2c"),all.x=TRUE)
+#Rename GDP category
+colnames(OrigData)[colnames(OrigData)=="NY.GDP.PCAP.CD"] <- "ExitGDP"
+# clean up excess columns
+OrigData$country.x <- NULL
+OrigData$country.y <- NULL
+```
+Merging World Bank Data: GDP Election Year
+```{r}
+# Need to create an election Year GDP 
+colnames(wdi.gdp)[colnames(wdi.gdp)=="Exityear"] <- "Electionyear"
+OrigData <- merge(OrigData,wdi.gdp,by=c("Electionyear", "iso2c"),all.x=TRUE)
+colnames(OrigData)[colnames(OrigData)=="NY.GDP.PCAP.CD"] <- "ElectionGDP"
+# clean up
+OrigData$country.x <- NULL
+OrigData$country.y <- NULL
+```
+Merging World Bank Data: GDP Two years before Election
+```{r}
+#First we need to create new variable that calculates what year it is two years prior to the election
+OrigData$TwoYearsBElection<-NULL
+OrigData$TwoYearsBElection <- (as.numeric(OrigData$Electionyear)- 2)
+# Now we can merge as we have been
+colnames(wdi.gdp)[colnames(wdi.gdp)=="Electionyear"] <- "TwoYearsBElection"
+OrigData <- merge(OrigData,wdi.gdp,by=c( "TwoYearsBElection", "iso2c"),all.x=TRUE)
+colnames(OrigData)[colnames(OrigData)=="NY.GDP.PCAP.CD"] <- "GDP2YBeforeElection"
+# clean up
+OrigData$country.x <- NULL
+OrigData$country.y <- NULL
+```
+
+Now we can calculate the Difference in GDP
+```{r}
+# Change in economy during time in Power.
+OrigData$ImprovGDP <- OrigData$ExitGDP-OrigData$EnterGDP
+# Change in econoy prior to election
+OrigData$StatusofGDP <- as.numeric(OrigData$ElectionGDP-OrigData$GDP2YBeforeElection)
+```
+Merging Polity Data: Loading Data
+```{r}
+#loading polity data - it is large so this may take a minute or two.
+P4 <- read.xls("p4v2014.xls")
+#Subseting to keep columns of interest, if you skip this you will merge a ton of columns that will just crowd the dataset
+keepvariables <- c("country", "year", "polity", "polity2", "durable", "democ", "autoc")
+P4subset <- P4[keepvariables]
+# assigning cown country code
+P4subset$cown <- countrycode(P4subset$country, "country.name", "cown")
+```
+Merging Polity Data: Coup Year
+```{r}
+# merging the Polity score from the beginning of the coup
+colnames(P4subset)[colnames(P4subset)=="year"] <- "Coupyear"
+OrigData  <- merge(OrigData,P4subset,by=c("cown", "Coupyear"),all.x=TRUE)
+# rename Columns
+colnames(OrigData)[colnames(OrigData)=="democ"] <- "Enterdemoc"
+colnames(OrigData)[colnames(OrigData)=="autoc"] <- "Enterauto"
+colnames(OrigData)[colnames(OrigData)=="polity"] <- "Enterpolity"
+colnames(OrigData)[colnames(OrigData)=="polity2"] <- "Enterpolity2"
+colnames(OrigData)[colnames(OrigData)=="durable"] <- "Enterdurable"
+```
+Merging Polity Data: Exit Year
+```{r}
+# merging the Polity score from the end of the coup
+#I need to rename the P4 year because it needs to be able to match
+colnames(P4subset)[colnames(P4subset)=="Coupyear"] <- "Exityear"
+# merge end date polity scores
+OrigData  <- merge(OrigData,P4subset, by=c("cown", "Exityear"),all.x=TRUE)
+# Rename new polity columns 
+colnames(OrigData)[colnames(OrigData)=="democ"] <- "Exitdemoc"
+colnames(OrigData)[colnames(OrigData)=="autoc"] <- "Exitauto"
+colnames(OrigData)[colnames(OrigData)=="polity"] <- "Exitpolity"
+colnames(OrigData)[colnames(OrigData)=="polity2"] <- "Exitpolity2"
+colnames(OrigData)[colnames(OrigData)=="durable"] <- "Exitdurable"
+colnames(OrigData)[colnames(OrigData)=="country.x"] <- "country"
+OrigData$country.y <- NULL
+```
+Merging Polity Data: Election Year
+```{r}
+#I need to rename the P4 year because it needs to be able to match
+colnames(P4subset)[colnames(P4subset)=="Exityear"] <- "Electionyear"
+# merge end date polity scores
+OrigData  <- merge(OrigData,P4subset, by=c("cown", "Electionyear"),all.x=TRUE)
+# Rename new polity columns 
+colnames(OrigData)[colnames(OrigData)=="democ"] <- "Electiondemoc"
+colnames(OrigData)[colnames(OrigData)=="autoc"] <- "Electionauto"
+colnames(OrigData)[colnames(OrigData)=="polity"] <- "Electionpolity"
+colnames(OrigData)[colnames(OrigData)=="polity2"] <- "Electionpolity2"
+colnames(OrigData)[colnames(OrigData)=="durable"] <- "Electiondurable"
+colnames(OrigData)[colnames(OrigData)=="country.x"] <- "country"
+OrigData$country.y <- NULL
+```
+Calculating the Differences in Polity Scores
+```{r}
+# first we need to get rid of codes used to denote missing values as these would through off the differences
+
+# Democracy Score
+OrigData$Enterdemoc[OrigData$Enterdemoc==-77]<- NA
+OrigData$Enterdemoc[OrigData$Enterdemoc==-88]<- NA
+OrigData$Exitdemoc[OrigData$Exitdemoc==-77]<- NA
+OrigData$Exitdemoc[OrigData$Exitdemoc==-88]<- NA
+
+#Polity Score
+OrigData$Enterpolity2[OrigData$Enterpolity2==-77]<- NA
+OrigData$Enterpolity2[OrigData$Enterpolity2==-88]<- NA
+OrigData$Exitpolity2[OrigData$Exitpolity2==-77]<- NA
+OrigData$Exitpolity2[OrigData$Exitpolity2==-88]<- NA
+
+#Polity Two Score 
+OrigData$Enterpolity[OrigData$Enterpolity==-77]<- NA
+OrigData$Enterpolity[OrigData$Enterpolity==-88]<- NA
+OrigData$Exitpolity[OrigData$Exitpolity==-77]<- NA
+OrigData$Exitpolity[OrigData$Exitpolity==-88]<- NA
+
+# Calculating the Difference
+OrigData$ImprovDemo <- OrigData$Exitdemoc - OrigData$Enterdemoc
+OrigData$Improvpolity <- OrigData$Exitpolity- OrigData$Enterpolity
+OrigData$Improvpolity2 <- OrigData$Exitpolity2- OrigData$Enterpolity2
+```
+
+Descriptive Statistics: Comparing Win and Lose
+```{r}
+sum(OrigData$Win==1, na.rm=TRUE)
+sum(OrigData$Win==0, na.rm=TRUE)
+```
+Descriptive Statistics: Comparing Means with Box plots
+```{r}
+# First we want to subset the Data so we are only looking at individuals who had a successful coup. This is important because if you look at everyone you are going to get a lot of zeros as failed coup leaders and no effect on any of the measures.
+
+OrigDatasubSuccess<- OrigData[which(OrigData$Successful==1),]
+# Now Graph
+ImprovPolity <- ggplot(OrigDatasubSuccess, aes(factor(OrigDatasubSuccess$Win), OrigDatasubSuccess$Improvpolity))+geom_boxplot()+ geom_jitter(colour = "black") + ylim(-10, 10) + labs(y="Improvement in Polity score During time in Power", x="Election Outcome", title="Differences in Improvement in Polity Score During time in Power")+ theme(panel.background = element_rect(fill='white', colour='black'))+ coord_flip()
+
+ImprovPolity
+
+ImprovDemo <-ggplot(OrigDatasubSuccess, aes(factor(OrigDatasubSuccess$Win), OrigDatasubSuccess$ImprovDemo))+geom_boxplot()+ geom_jitter(colour = "black") + ylim(-10, 10) + labs(y="Improvement in demo Polity score During time in Power", x="Election Outcome", title="Differences in Improvement in demo Polity Score During time in Power")+ theme(panel.background = element_rect(fill='white', colour='black'))+ coord_flip()
+ImprovDemo
+
+ImprovGDP <-ggplot(OrigDatasubSuccess, aes(factor(OrigDatasubSuccess$Win), OrigDatasubSuccess$ImprovGDP))+geom_boxplot()+ geom_jitter(colour = "black") + labs(y="Improvement in GDP During time in Power", x="Election Outcome", title="Differences in Improvement in GDP During time in Power")+ theme(panel.background = element_rect(fill='white', colour='black'))+ coord_flip()
+ImprovGDP
+
+Reign.Years <-ggplot(OrigDatasubSuccess, aes(factor(OrigDatasubSuccess$Win), OrigDatasubSuccess$Reign.year))+geom_boxplot()+ geom_jitter(colour = "black") + labs(y="Length of Time in Power After Coup", x="Election Outcome", title="Differences in Time in Power after Coup")+ ylim(1,40)+ theme(panel.background = element_rect(fill='white', colour='black'))+ coord_flip()
+Reign.Years
+
+
+ElectionGDP <- ggplot(OrigData, aes(factor(OrigData$Win), OrigData$ElectionGDP))+geom_boxplot()+ geom_jitter(colour = "black") + labs(y="GDP during Election", x="Election Outcome", title="Differences in Election GDP")+theme(panel.background = element_rect(fill='white', colour='black'))+ coord_flip()
+ElectionGDP
+```
+
+Summary Statistics: Death Toll
+```{r}
+# Need to create subset variables that include values only when the candidate one or loss
+# DeathToll
+DeathTollWin <- OrigData$Death.Toll[OrigData$Win == 1]
+mean(DeathTollWin, na.rm=TRUE)
+#if you get rid of case with 5000 deaths
+DeathTollWinminuso <- DeathTollWin[DeathTollWin <= 500]
+mean(DeathTollWinminuso, na.rm=TRUE)
+# Death Toll if the canidate lost
+DeathTollLose <- OrigData$Death.Toll[OrigData$Win == 0]
+mean(DeathTollLose,na.rm=TRUE)
+TTestDeathToll <- t.test(DeathTollWinminuso, DeathTollLose, alternative="two.sided",conf.level=0.95)
+TTestDeathToll
+```
+
+Summary Statistics: Improved Demo Polity Score
+```{r}
+# I want to only look at Demo Polity score for candidates that won.
+ImprovDemoWin <- OrigData$ImprovDemo[OrigData$Win == 1] 
+# I want to only look at Demo Polity score for candidates that lost.
+ImprovDemoLose <- OrigData$ImprovDemo[OrigData$Win == 0]
+# mean of score improved for candidates who won
+mean(ImprovDemoWin, na.rm=TRUE)
+# mean of score improved for candidates who lost
+mean(ImprovDemoLose, na.rm=TRUE)
+#ttest
+TTestImprovDemoc <- t.test(ImprovDemoWin, ImprovDemoLose,alternative="two.sided",conf.level=0.95, na.rm=TRUE)
+TTestImprovDemoc
+```
+Summary Statistics: Improved Polity Score
+```{r}
+# I want to only look at Demo Polity scores for candidates that won.
+ImprovPolityWin <- OrigData$Improvpolity[OrigData$Win == 1]
+# I want to only look at Demo Polity scores for candidates that lost.
+ImprovPolityLose <- OrigData$Improvpolity[OrigData$Win == 0]
+# mean of score improved for candidates who won
+mean(ImprovPolityWin, na.rm=TRUE)
+# mean of score improved for candidates who lost
+mean(ImprovPolityLose, na.rm=TRUE)
+#ttest
+TTestImprovPolity <- t.test(ImprovPolityWin, ImprovPolityLose,alternative="two.sided",conf.level=0.95, na.rm=TRUE)
+TTestImprovPolity
+```
+Summary Statistics: Improved Polity2 Scores
+```{r}
+# I want to only look at Polity2 score for candidates that won.
+ImprovPolity2Win <- OrigData$Improvpolity2[OrigData$Win == 1]
+# I want to only look at Polity2 score for candidates that lost.
+ImprovPolity2Lose <- OrigData$Improvpolity2[OrigData$Win == 0]
+# mean of score improved for candidates who won
+mean(ImprovPolity2Win, na.rm=TRUE)
+# mean of score improved for candidates who lost
+mean(ImprovPolity2Lose, na.rm=TRUE)
+#ttest
+TTestImprovPolity2 <- t.test(ImprovPolity2Win, ImprovPolity2Lose,alternative="two.sided",conf.level=0.95, na.rm=TRUE)
+TTestImprovPolity2
+```
+
+Summary Statistics: Time off
+```{r}
+# I want to only look at time off for candidates that won.
+Timeoff.yearswin <- OrigData$TimeOff.years[OrigData$Win == 1] 
+# I want to only look at time off for candidates that lost.
+Timeoff.yearslose <- OrigData$TimeOff.years[OrigData$Win == 0]
+# mean time off for candidates who won
+mean(Timeoff.yearswin, na.rm=TRUE)
+# mean oftime off for candidates who lost
+mean(Timeoff.yearslose, na.rm=TRUE)
+#ttest
+TTestTimeoff.years <- t.test(Timeoff.yearswin, Timeoff.yearslose,alternative="two.sided",conf.level=0.95, na.rm=TRUE)
+TTestTimeoff.years 
+```
+
+Descriptive Statistics: Incumbency and Opposition
+```{r}
+# I want to look at only incumbents.
+OrigDataIncumbent<- OrigData[OrigData$Incumbent==1,]
+# How Many Incumbents Candidates Won?
+sum(OrigDataIncumbent$Win==1, na.rm=TRUE)
+
+# I want to only look at opposition candidates.
+OrigDataOpp <- OrigData[OrigData$Incumbent==0,]
+# How many Opposition Candidates Won?
+sum(OrigDataOpp$Win==1, na.rm=TRUE)
+
+# I want to only look at candidates who came straight from the Coup
+OrigDataStraightFromCoup <- OrigData[OrigData$Incumbent==3,]
+sum(OrigDataStraightFromCoup$Win==1, na.rm=TRUE)
+
+
+```
+Smoothed Regressions: Polity Scores
+```{r}
+ImprovPolityLOESS <- ggplot(OrigDatasubSuccess, aes(OrigDatasubSuccess$Improvpolity, OrigDatasubSuccess$Win)) + stat_smooth(method = "loess")+ geom_jitter(colour = "black") + labs(y="Election Outcome", x="Improvement in Polity Scores", title="Improvement in Polity Score During time in Power")+ theme(panel.background = element_rect(fill='white', colour='black'))
+ImprovPolityLOESS
+
+ImprovPolity2LOESS <- ggplot(OrigDatasubSuccess, aes(OrigDatasubSuccess$Improvpolity2, OrigDatasubSuccess$Win)) + stat_smooth(method = "loess")+ geom_jitter(colour = "black") + labs(y="Election Outcome", x="Improvement in Polity Scores", title="Improvement in Polity2 Score During time in Power")+ theme(panel.background = element_rect(fill='white', colour='black'))
+ImprovPolity2LOESS 
+
+ImprovDEMOLOESS <- ggplot(OrigDatasubSuccess, aes(OrigDatasubSuccess$ImprovDemo, OrigDatasubSuccess$Win)) + stat_smooth(method = "loess")+ geom_jitter(colour = "black") + labs(y="Election Outcome", x="Improvement in  Demo Polity Scores", title="Improvement in Demo Polity Score During time in Power")+ theme(panel.background = element_rect(fill='white', colour='black'))
+ImprovDEMOLOESS
+```
+
+Lets Look at Incumbency Effects
+```{r}
+ImprovPolityLOESSIncumbent <- ggplot(OrigDatasubSuccess, aes(OrigDatasubSuccess$Improvpolity, OrigDatasubSuccess$Win)) + stat_smooth(method = "loess")+geom_jitter(aes(colour = factor(OrigDatasubSuccess$Incumbent))) + labs(y="Election Outcome", x="Improvement in Polity Scores", title="Improvement in Polity Score During time in Power")+ theme(panel.background = element_rect(fill='white', colour='black'))+ theme(legend.position = "bottom") + theme(legend.background = element_rect(colour = "black"))+geom_vline(xintercept=0, colour= "grey")+geom_hline(yintercept=.5, colour="grey")+scale_color_manual("Incumbency Status",labels = c("Opposition", "Incumbent", "Straight From Coup"), values = c( "red","blue", "green"))
+ImprovPolityLOESSIncumbent
+# The color points are showing you the candidates incumbency status, the line on the Y axis is showing you if they won or lost, as the jitter spreads out the points (above is won, below is lost). The line a zero is just to help see the change between negative and positive effects.
+```
+Smoothed Regressions: GDP
+```{r}
+
+StatusofGDPLOESS <- ggplot(OrigData, aes(OrigData$StatusofGDP , OrigData$Win)) + stat_smooth(method = "loess")+ geom_jitter(colour = "black")+xlim(-200, 1500) + labs(y="Election Outcome", x="Difference in Election Year GDP and GDP Two Years Prior", title="Was the Economy Better During the Election?")+ theme(panel.background = element_rect(fill='white', colour='black'))
+
+StatusofGDPLOESS
+
+# Lets take out Nigeria - ie the only point at 1500
+
+StatusofGDPLOESSminus0 <- ggplot(OrigData, aes(OrigData$StatusofGDP , OrigData$Win)) + stat_smooth(method = "loess")+ geom_jitter(colour = "black")+xlim(-200, 700) + labs(y="Election Outcome", x="Difference in Election Year GDP and GDP Two Years Prior", title="Was the Economy Better During the Election?")+ theme(panel.background = element_rect(fill='white', colour='black'))
+StatusofGDPLOESSminus0
+
+# Lets Look at Incumbency Effects with GDP
+
+OrigDataIncumbent<- OrigData[OrigData$Incumbent==1,]
+
+StatusofGDPLOESSINCUMBENT <- ggplot(OrigDataIncumbent, aes(OrigDataIncumbent$StatusofGDP , OrigDataIncumbent$Win)) + stat_smooth(method = "loess")+ geom_jitter(colour = "black")+xlim(-200, 400) + labs(y="Election Outcome For Incumbents", x="Difference in Election Year GDP and GDP Two Years Prior", title="Was the Economy Better During the Election?")+ theme(panel.background = element_rect(fill='white', colour='black'))+geom_vline(xintercept=0, colour= "grey")+geom_hline(yintercept=.5, colour="grey")
+StatusofGDPLOESSINCUMBENT
+
+OrigDataOpp<- OrigData[OrigData$Incumbent==0,]
+
+StatusofGDPLOESSOPP <- ggplot(OrigDataOpp, aes(OrigDataOpp$StatusofGDP , OrigDataOpp$Win)) + stat_smooth(method = "loess")+ geom_point()+ geom_jitter(colour = "black")+xlim(-200, 700) + labs(y="Election Outcome For Opposition", x="Difference in Election Year GDP and GDP Two Years Prior", title="Was the Economy Better During the Election?")+ theme(panel.background = element_rect(fill='white', colour='black'))+geom_vline(xintercept=0, colour= "grey")+geom_hline(yintercept=.5, colour="grey")
+StatusofGDPLOESSOPP
+
+OrigDataInPower<- OrigData[OrigData$Incumbent==3,]
+StatusofGDPLOESSinPOwer <- ggplot(OrigDataInPower, aes(OrigDataInPower$StatusofGDP , OrigDataInPower$Win)) + stat_smooth(method = "loess")+ geom_jitter(colour = "black")+xlim(-200, 300) + labs(y="Election Outcome For Leaders Straight From Coup", x="Difference in Election Year GDP and GDP Two Years Prior", title="Was the Economy Better During the Election?")+ theme(panel.background = element_rect(fill='white', colour='black'))+geom_vline(xintercept=0, colour= "grey")+geom_hline(yintercept=.5, colour="grey")
+StatusofGDPLOESSinPOwer
+
+# In this graph we will factor by the variable Incumbency. In doing so, we will hopefully be able to see a more detailed picture of the effect of GDP per varying type of candidate
+
+StatusofGDPLOESSV2 <- ggplot(OrigData, aes(OrigData$StatusofGDP , OrigData$Win)) + stat_smooth(method = "loess")+ geom_jitter(aes(colour = factor(OrigData$Incumbent)))+xlim(-200, 1600) + labs(y="Election Outcome", x="Difference in Election Year GDP and GDP Two Years Prior", title="Was the Economy Better During the Election?")+ theme(panel.background = element_rect(fill='white', colour='black'))+ theme(legend.position = "bottom") + theme(legend.background = element_rect(colour = "black"))+geom_vline(xintercept=0, colour= "grey")+geom_hline(yintercept=.5, colour="grey")+scale_color_manual("Incumbency Status",labels = c("Opposition", "Incumbent", "Straight From Coup"), values = c("red","blue", "green"))
+StatusofGDPLOESSV2
+# The color points are showing you the candidates incumbency status, the line on the Y axis is showing you if they won or lost, as the jitter spreads out the points (above is won, below is lost). The line a zero is just to help see the change between negative and positive effects.
+
+# Lets take out the problem child that is Nigeria
+StatusofGDPLOESSV2minuso <- ggplot(OrigData, aes(OrigData$StatusofGDP , OrigData$Win)) + stat_smooth(method = "loess")+ geom_jitter(aes(colour = factor(OrigData$Incumbent)))+xlim(-200, 600) + labs(y="Election Outcome", x="Difference in Election Year GDP and GDP Two Years Prior", title="Was the Economy Better During the Election?")+ theme(panel.background = element_rect(fill='white', colour='black'))+ theme(legend.position = "bottom") + theme(legend.background = element_rect(colour = "black"))+geom_vline(xintercept=0, colour= "grey")+geom_hline(yintercept=.5, colour="grey")+scale_color_manual("Incumbency Status",labels = c("Opposition", "Incumbent", "Straight From Coup"), values = c( "red","blue", "green"))
+StatusofGDPLOESSV2minuso
+# We can also look at maj/min ethnic group in terms of election results
+
+StatusofGDPEthnicminuso <- ggplot(OrigData, aes(OrigData$StatusofGDP , OrigData$Win)) + stat_smooth(method = "loess")+ geom_jitter(aes(colour = factor(OrigData$MajEthnic)))+xlim(-200, 600) + labs(y="Election Outcome", x="Difference in Election Year GDP and GDP Two Years Prior", title="Was the Economy Better During the Election?")+ theme(panel.background = element_rect(fill='white', colour='black'))+ theme(legend.position = "bottom") + theme(legend.background = element_rect(colour = "black"))+geom_vline(xintercept=0, colour= "grey")+geom_hline(yintercept=.5, colour="grey")+scale_color_manual("Member of Majority Ethnic Group?",labels = c("No", "Yes"), values = c( "red","blue"))
+StatusofGDPEthnicminuso 
+
+```
+Smoothed Regressions: Time Off
+```{r}
+
+TimeOffReg <- ggplot(OrigData, aes(OrigData$TimeOff.year , OrigData$Win)) + stat_smooth(method = "loess")+ geom_jitter(aes(colour = factor(OrigData$Incumbent)))+xlim(0, 40) + labs(y="Election Outcome", x="Time Off From Coup To Election", title="Does the Time Between The Coup and Election Matter?")+ theme(panel.background = element_rect(fill='white', colour='black'))+ theme(legend.position = "bottom") + theme(legend.background = element_rect(colour = "black"))+geom_hline(yintercept=.5, colour="grey")+scale_color_manual("Incumbency Status",labels = c("Opposition", "Incumbent", "Straight From Coup"), values = c( "red","blue", "green"))
+TimeOffReg
+```
+Lets Build Some Tables: Trying out Stargazer
+```{r}
+# first I want to subset data frame to only keep columns I want to show
+OrigDataimprovsumm <- OrigData[c("ImprovDemo", "Reign.weeks", "ImprovGDP", "Improvpolity")]
+stargazer(OrigDataimprovsumm, summary=TRUE)
+```
+
+
+
+
