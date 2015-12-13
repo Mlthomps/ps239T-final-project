@@ -18,12 +18,14 @@ The coding aspect of the project was focused on merging the data  for each year 
 
 * the original raw data is not included in this repo, please email mlthomps@berkeley.edu if you have questions.
 
-### Code and Results
+### Code 
 
 The entirety of the project was done in R. This code merges the data, performs the analytics, and creates the images.
 
 FinalComputationRCode12_12.Rmd: 
+Results
 
-
+In addition to the Rmd code, I have included pdfs of some of the graphs I created
+FinalComputationRCode12_12.Rmd: 
 ## More Information
 The original raw data is not included in the repo.
